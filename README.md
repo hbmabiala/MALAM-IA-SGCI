@@ -1,14 +1,14 @@
-# T-chIA — Plateforme Intelligente de Formation SGCI
+# MALAM'IA — Plateforme Intelligente de Formation SGCI
 **Société Générale Côte d'Ivoire (SGCI) — Direction des Ressources Humaines & SGCI Academy**
 
 ---
 
 ## 1. Présentation Générale
 
-**T-chIA** est la solution corporate d'apprentissage augmenté par Intelligence Artificielle conçue pour les collaborateurs de la **Société Générale Côte d'Ivoire**. Elle transforme les politiques bancaires, procédures opérationnelles, documents réglementaires et référentiels métiers en parcours de formation dynamiques, interactifs et auditables.
+**MALAM'IA** est la solution corporate d'apprentissage augmenté par Intelligence Artificielle conçue pour les collaborateurs de la **Société Générale Côte d'Ivoire**. Elle transforme les politiques bancaires, procédures opérationnelles, documents réglementaires et référentiels métiers en parcours de formation dynamiques, interactifs et auditables.
 
 La solution intègre :
-- **Un tuteur pédagogique IA interactif ("T-chIA")** capable de dispenser le cours à l'oral (Edge-TTS) et d'animer des sessions questions/réponses contextuelles basées sur le RAG bancaire SGCI.
+- **Un tuteur pédagogique IA interactif ("MALAM'IA")** capable de dispenser le cours à l'oral (Edge-TTS) et d'animer des sessions questions/réponses contextuelles basées sur le RAG bancaire SGCI.
 - **Un moteur de génération documentaire** produisant des supports normés aux standards SGCI (PDF et présentations PPTX) ainsi que des quiz d'évaluation calibrés.
 - **Un système de certification rigoureux** combinant épreuve écrite QCM (70%) et soutenance orale argumentée (30%) pour les formations obligatoires assignées.
 - **Un cockpit de pilotage RH & Formation (LMS / LXP)** offrant un suivi en temps réel des utilisateurs connectés, du respect des échéances réglementaires à 10 jours ouvrés, et des téléchargements de supports.
@@ -20,7 +20,7 @@ La solution intègre :
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
 │                        FRONTEND (SPA Vanilla JS)                       │
-│  - Charte Graphique SGCI & T-chIA (Bandeau rouge & noir, typographies) │
+│  - Charte Graphique SGCI & MALAM'IA (Bandeau rouge & noir)             │
 │  - Modal de Divulgation IA & Consentement RGPD / Conformité            │
 │  - Lecteur de Cours Ergonomique (Contenu d'abord, volet questions)    │
 │  - Module d'Évaluation Composite (QCM + Soutenance Orale Audio/Texte)  │
@@ -42,6 +42,9 @@ La solution intègre :
 │  - Tables d'audit & logs   │ │  - ReportLab / FPDF (PDF) & PPTX        │
 └────────────────────────────┘ └─────────────────────────────────────────┘
 ```
+
+> [!TIP]
+> **Documentation Technique Détaillée** : Retrouvez le dictionnaire complet des données (11 tables SQLite), les métadonnées ChromaDB, les 40+ endpoints REST et l'arborescence des 17 modules JavaScript dans le fichier dédié : [DOCUMENTATION_TECHNIQUE.md](file:///c:/Users/dicko/SGCI_2026_001/10_09_2026_001_bon/DOCUMENTATION_TECHNIQUE.md).
 
 ---
 

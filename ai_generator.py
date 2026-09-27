@@ -12,7 +12,10 @@ from pptx.util import Inches, Pt
 from pptx.dml.color import RGBColor
 from pptx.enum.text import PP_ALIGN, MSO_ANCHOR
 from pptx.enum.shapes import MSO_SHAPE
-import comtypes.client
+try:
+    import comtypes.client
+except ImportError:
+    comtypes = None
 from dotenv import load_dotenv
 import chromadb
 from pydub import AudioSegment
@@ -23,7 +26,7 @@ import unicodedata
 def generate_standard_document_name(arg1, arg2, module_idx=1, version_or_ext=1, ext="pdf"):
     """
     Convention de nommage officielle SGCI :
-    Format : SGCI_TCHIA_[TYPE]_[FORMATION]_[MODULE]_[VERSION]_[DATE].[ext]
+    Format : SGCI_MALAMIA_[TYPE]_[FORMATION]_[MODULE]_[VERSION]_[DATE].[ext]
     Types : SUPPORT, SUPPORT_COURS, PRESENTATION, QCM, EVALUATION, CERTIFICAT, RESSOURCE
     """
     known_types = {'SUPPORT', 'SUPPORT_COURS', 'PRESENTATION', 'QCM', 'EVALUATION', 'CERTIFICAT', 'RESSOURCE'}
@@ -50,7 +53,7 @@ def generate_standard_document_name(arg1, arg2, module_idx=1, version_or_ext=1, 
     mod_str = f"M{int(module_idx)}"
     v_str = f"V{int(version)}"
     d_str = datetime.now().strftime("%Y%m%d")
-    return f"SGCI_TCHIA_{clean_type}_{clean_title}_{mod_str}_{v_str}_{d_str}.{clean_ext}"
+    return f"SGCI_MALAMIA_{clean_type}_{clean_title}_{mod_str}_{v_str}_{d_str}.{clean_ext}"
 
 def get_archived_course_path(course_id, subfolder="SUPPORTS"):
     """Crée et retourne l'arborescence logique d'archivage FORMATIONS_ARCHIVES/FORMATION_{id}/{subfolder}."""
@@ -452,7 +455,7 @@ def build_executive_presentation(course_data, title, domain, output_pptx, logo_p
     return prs
 
 def get_chroma_collection():
-    CHROMA_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "chroma_db")
+    CHROMA_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "chroma_db") if os.path.exists(os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "chroma_db")) else os.path.join(os.path.dirname(os.path.abspath(__file__)), "chroma_db")
     os.makedirs(CHROMA_PATH, exist_ok=True)
     chroma_client = chromadb.PersistentClient(path=CHROMA_PATH)
     try:
@@ -672,7 +675,7 @@ def generate_course_from_file(raw_filepath, base_filename, title, domain, output
     if progress_callback: progress_callback("Génération du diaporama corporate...", 70)
     
     slides_list = course_data.get("slides", [])
-    logo_path = os.path.join(os.path.dirname(__file__), "logo.png")
+    logo_path = os.path.join(os.path.dirname(__file__), "static", "img", "logo.png") if os.path.exists(os.path.join(os.path.dirname(__file__), "static", "img", "logo.png")) else os.path.join(os.path.dirname(__file__), "logo.png")
     if not os.path.exists(logo_path):
         logo_path = os.path.join(os.path.dirname(__file__), "logo.jpg")
     

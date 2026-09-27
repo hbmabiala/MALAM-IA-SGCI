@@ -9,7 +9,7 @@ import io
 import unicodedata
 from datetime import datetime, date, timedelta
 import pandas as pd
-from flask import Flask, request, jsonify, send_from_directory, send_file, Response
+from flask import Flask, request, jsonify, send_from_directory, send_file, Response, render_template, redirect
 import sqlite3
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
@@ -28,8 +28,9 @@ from ai_generator import (
 )
 
 load_dotenv(override=True)
+basedir = os.path.abspath(os.path.dirname(__file__))
 
-app = Flask(__name__)
+app = Flask(__name__, template_folder='templates', static_folder='static')
 CORS(app)
 
 # Caches mémoire ultra-rapides
@@ -91,8 +92,10 @@ def resolve_voice_profile(course_id=None, voice_key=None):
             pass
     return VOICE_PROFILES[0]
 
+DB_PATH = os.path.join(basedir, 'data', 'database.db') if os.path.exists(os.path.join(basedir, 'data', 'database.db')) else os.path.join(basedir, 'database.db')
+
 def get_db_connection():
-    conn = sqlite3.connect('database.db', timeout=30.0)
+    conn = sqlite3.connect(DB_PATH, timeout=30.0)
     try:
         conn.execute("PRAGMA journal_mode=WAL;")
     except Exception:
@@ -524,6 +527,17 @@ def init_db():
 
 init_db()
 
+# Auto-seeding initial si la base est neuve (ex: premier déploiement Cloud Render)
+try:
+    _conn_chk = get_db_connection()
+    _cnt = _conn_chk.execute("SELECT COUNT(*) FROM courses").fetchone()[0]
+    _conn_chk.close()
+    if _cnt == 0:
+        print("Base de données vierge détectée, initialisation des données de démonstration MALAM'IA...", flush=True)
+        import seed_demo
+except Exception as _e_seed:
+    print(f"Note initialisation seed: {_e_seed}", flush=True)
+
 UPLOAD_FOLDER = 'uploads'
 PDF_FOLDER = 'static/courses'
 THUMBNAILS_FOLDER = 'static/thumbnails'
@@ -556,9 +570,10 @@ def generate_pdf(slides_data, output_path):
         # Page de garde
         if i == 0:
             # Logo s'il existe
-            if os.path.exists("logo.png"):
+            logo_p = os.path.join(basedir, "static", "img", "logo.png")
+            if os.path.exists(logo_p):
                 # Centré en haut
-                pdf.image("logo.png", x=128.5, y=30, w=40)
+                pdf.image(logo_p, x=128.5, y=30, w=40)
             
             # Titre principal centré verticalement et horizontalement
             pdf.set_y(90)
@@ -657,8 +672,11 @@ def create_course():
         edge_voice = voice_prof['edge_voice']
 
         # 3. Génération complète : PPTX, PDF, Audio Narration Edge-TTS, Timestamps, ChromaDB RAG
-        import pythoncom
-        pythoncom.CoInitialize()
+        if os.name == 'nt':
+            try:
+                import pythoncom
+                pythoncom.CoInitialize()
+            except Exception: pass
         try:
             gen_result = generate_course_from_file(
                 raw_filepath=raw_filepath,
@@ -671,8 +689,11 @@ def create_course():
                 tutor_voice=edge_voice
             )
         finally:
-            try: pythoncom.CoUninitialize()
-            except Exception: pass
+            if os.name == 'nt':
+                try:
+                    import pythoncom
+                    pythoncom.CoUninitialize()
+                except Exception: pass
 
         if os.path.exists(raw_filepath):
             try: os.remove(raw_filepath)
@@ -1912,8 +1933,18 @@ def login():
     if user:
         user_dict = dict(user)
         user_dict.pop('password', None)
-        return jsonify({'success': True, 'user': user_dict})
+        resp = jsonify({'success': True, 'user': user_dict})
+        resp.set_cookie('ia_user_role', user_dict.get('role', 'user'), max_age=86400, samesite='Lax')
+        resp.set_cookie('ia_user_id', str(user_dict.get('id', '')), max_age=86400, samesite='Lax')
+        return resp
     return jsonify({'success': False, 'error': 'Matricule ou mot de passe incorrect'}), 401
+
+@app.route('/api/logout', methods=['POST', 'GET'])
+def api_logout():
+    resp = jsonify({'success': True, 'message': 'Déconnexion réussie'})
+    resp.delete_cookie('ia_user_role')
+    resp.delete_cookie('ia_user_id')
+    return resp
 
 def calculate_anciennete_days(date_str):
     if not date_str:
@@ -3240,7 +3271,7 @@ def export_admin_pilotage():
     return Response(
         csv_str,
         mimetype='text/csv; charset=utf-8',
-        headers={'Content-Disposition': f'attachment; filename=SGCI_TCHIA_PILOTAGE_FORMATION_{d_str}.csv'}
+        headers={'Content-Disposition': f'attachment; filename=SGCI_MALAMIA_PILOTAGE_FORMATION_{d_str}.csv'}
     )
 
 # Route de téléchargement standardisé des supports (Section 4 & plan d'archivage SGCI)
@@ -3330,18 +3361,237 @@ def serve_pdf(filename):
             std_name = generate_standard_document_name(course_title, type_label, 1, 1, ext)
             return send_from_directory(PDF_FOLDER, filename, as_attachment=True, download_name=std_name)
     return send_from_directory(PDF_FOLDER, filename)
+# ==============================================================================
+# MODULE D'EVALUATION & BENCHMARK RAG (CHROMA DB + GEMINI) - EXCLUSIF SUPER ADMIN
+# ==============================================================================
 
-basedir = os.path.abspath(os.path.dirname(__file__))
+def check_superadmin_auth():
+    """
+    Vérifie que la requête provient d'un compte Super Administrateur.
+    Contrôle strict pour la production.
+    """
+    user_id = (
+        request.headers.get('X-User-Id') or 
+        request.args.get('user_id') or 
+        (request.is_json and request.json and request.json.get('user_id'))
+    )
+    if not user_id:
+        return None, (jsonify({'success': False, 'error': 'Authentification requise'}), 401)
+    
+    conn = get_db_connection()
+    try:
+        user = conn.execute("SELECT id, matricule, nom, prenom, role FROM users WHERE id = ?", (user_id,)).fetchone()
+    finally:
+        conn.close()
+        
+    if not user:
+        return None, (jsonify({'success': False, 'error': 'Utilisateur introuvable'}), 404)
+        
+    if user['role'] != 'superadmin':
+        return None, (jsonify({'success': False, 'error': 'Accès interdit : rôle Super Administrateur requis'}), 403)
+        
+    return dict(user), None
 
-# Ajouter la route principale statique pour servir index.html
+@app.route('/api/admin/rag_evaluation', methods=['GET'])
+def get_rag_evaluation_data():
+    user, err_resp = check_superadmin_auth()
+    if err_resp:
+        return err_resp
+        
+    try:
+        import evaluate_rag
+        courses = evaluate_rag.get_evaluable_courses()
+        latest_report = evaluate_rag.get_latest_report()
+        return jsonify({
+            'success': True,
+            'courses': courses,
+            'latest_report': latest_report,
+            'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        })
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': f"Erreur lors de la récupération des données d'évaluation: {str(e)}"}), 500
+
+@app.route('/api/admin/rag_evaluation/run', methods=['POST'])
+def run_rag_evaluation_api():
+    user, err_resp = check_superadmin_auth()
+    if err_resp:
+        return err_resp
+        
+    data = request.json or {}
+    course_base_id = (data.get('course_base_id') or data.get('base_id') or '').strip()
+    mode = data.get('mode', 'benchmark') # 'benchmark' ou 'single'
+    custom_query = (data.get('query') or '').strip()
+    n_results = int(data.get('n_results') or 3)
+    
+    try:
+        import evaluate_rag
+        
+        if mode == 'single' and custom_query:
+            # Mode test unitaire rapide
+            report = evaluate_rag.run_evaluation(course_base_id=course_base_id or None, questions=[custom_query])
+        else:
+            # Mode benchmark complet
+            report = evaluate_rag.run_evaluation(course_base_id=course_base_id or None)
+            
+        if not report:
+            return jsonify({'success': False, 'error': "L'évaluation n'a produit aucun résultat."}), 500
+            
+        return jsonify({
+            'success': True,
+            'report': report,
+            'executed_by': user['matricule']
+        })
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': f"Erreur pendant l'exécution de l'évaluation RAG: {str(e)}"}), 500
+
+@app.route('/api/admin/rag_evaluation/export', methods=['GET'])
+def export_rag_evaluation_report():
+    user, err_resp = check_superadmin_auth()
+    if err_resp:
+        return err_resp
+        
+    report_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "rag_evaluation_report.json")
+    if not os.path.exists(report_file):
+        return jsonify({'success': False, 'error': "Aucun rapport d'évaluation disponible pour le téléchargement."}), 404
+        
+    return send_file(
+        report_file,
+        mimetype='application/json',
+        as_attachment=True,
+        download_name=f"SGCI_RAG_Evaluation_Report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+    )
+
+# Helper d'authentification pour les vues HTML
+def get_authenticated_role():
+    user_role = request.cookies.get('ia_user_role')
+    if not user_role and request.headers.get('X-User-Id'):
+        try:
+            conn = get_db_connection()
+            u = conn.execute("SELECT role FROM users WHERE id = ?", (request.headers.get('X-User-Id'),)).fetchone()
+            conn.close()
+            if u:
+                user_role = u['role']
+        except Exception:
+            pass
+    return user_role
+
+# Route d'accueil : Redirige vers /dashboard ou /login
 @app.route('/')
-def index():
-    return send_from_directory(basedir, 'index.html')
+def index_view():
+    role = get_authenticated_role()
+    if not role:
+        return redirect('/login')
+    return redirect('/dashboard')
+
+# Route de connexion dédiée et isolée (Ne contient aucun dashboard ni catalogue)
+@app.route('/login')
+def login_view():
+    return render_template('login.html')
+
+# Page Tableau de Bord dédiée (Distribuée selon le profil utilisateur)
+@app.route('/dashboard')
+def dashboard_view():
+    role = get_authenticated_role()
+    if not role:
+        return redirect('/login')
+    return render_template('dashboard.html', user_role=role, active_page='dashboard')
+
+# Page Catalogue des Formations dédiée
+@app.route('/catalogue')
+@app.route('/consultation')
+def catalogue_view():
+    role = get_authenticated_role()
+    if not role:
+        return redirect('/login')
+    return render_template('catalogue.html', user_role=role, active_page='consultation')
+
+# Page Gestion des Utilisateurs dédiée (Admin / Superadmin)
+@app.route('/users')
+def users_view():
+    role = get_authenticated_role()
+    if not role:
+        return redirect('/login')
+    if role not in ['admin', 'superadmin']:
+        return redirect('/dashboard')
+    return render_template('users.html', user_role=role, active_page='users')
+
+# Page Assignations & Parcours dédiée (Admin / Superadmin)
+@app.route('/assignments')
+def assignments_view():
+    role = get_authenticated_role()
+    if not role:
+        return redirect('/login')
+    if role not in ['admin', 'superadmin']:
+        return redirect('/dashboard')
+    return render_template('assignments.html', user_role=role, active_page='assignments')
+
+# Page Création & Ingestion IA dédiée (Admin / Superadmin)
+@app.route('/creation')
+def creation_view():
+    role = get_authenticated_role()
+    if not role:
+        return redirect('/login')
+    if role not in ['admin', 'superadmin']:
+        return redirect('/dashboard')
+    return render_template('creation.html', user_role=role, active_page='creation')
+
+# Page Audit & Évaluation RAG dédiée (Superadmin exclusif)
+@app.route('/rag-eval')
+def rag_eval_view():
+    role = get_authenticated_role()
+    if not role:
+        return redirect('/login')
+    if role != 'superadmin':
+        return redirect('/dashboard')
+    return render_template('rag-eval.html', user_role=role, active_page='rag-eval')
+
+# Page Mode Présentation Slides & Audio dédiée
+@app.route('/presentation')
+def presentation_view():
+    role = get_authenticated_role()
+    if not role:
+        return redirect('/login')
+    return render_template('presentation.html', user_role=role, active_page='presentation')
+
+# Page Tuteur Interactif Live T-chIA dédiée
+@app.route('/details')
+def details_view():
+    role = get_authenticated_role()
+    if not role:
+        return redirect('/login')
+    return render_template('details.html', user_role=role, active_page='details')
+
+# Page Mode Évaluation & Quiz dédiée
+@app.route('/evaluation')
+def evaluation_view():
+    role = get_authenticated_role()
+    if not role:
+        return redirect('/login')
+    return render_template('evaluation.html', user_role=role, active_page='evaluation')
+
+@app.route('/style.css')
+def legacy_style():
+    return send_from_directory(os.path.join(basedir, 'static', 'css'), 'style.css')
+
+@app.route('/logo.png')
+def legacy_logo():
+    return send_from_directory(os.path.join(basedir, 'static', 'img'), 'logo.png')
+
+@app.route('/config.js')
+def legacy_config():
+    return send_from_directory(os.path.join(basedir, 'static', 'js'), 'config.js')
+
+@app.route('/js/<path:path>')
+def legacy_js(path):
+    return send_from_directory(os.path.join(basedir, 'static', 'js'), path)
 
 @app.route('/<path:path>')
 def serve_static(path):
     return send_from_directory(basedir, path)
 
 if __name__ == '__main__':
-    print("Démarrage du serveur Flask sur le port 8092...")
-    app.run(port=8092, host='0.0.0.0', debug=True)
+    port = int(os.environ.get('PORT', 8092))
+    print(f"Démarrage du serveur Flask MALAM'IA sur le port {port}...")
+    app.run(port=port, host='0.0.0.0', debug=False)
