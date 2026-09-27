@@ -9,5 +9,6 @@ pandas>=2.0.0
 python-dotenv>=1.0.0
 edge-tts>=6.1.9
 pydub>=0.25.1
+pyaudioop>=0.1.1
 werkzeug>=3.0.0
 requests>=2.31.0

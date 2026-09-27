@@ -18,7 +18,11 @@ except ImportError:
     comtypes = None
 from dotenv import load_dotenv
 import chromadb
-from pydub import AudioSegment
+try:
+    from pydub import AudioSegment
+except Exception as e_pydub:
+    print(f"Note: AudioSegment/pydub non initialisé: {e_pydub}")
+    AudioSegment = None
 from fpdf import FPDF
 from datetime import datetime
 import unicodedata
